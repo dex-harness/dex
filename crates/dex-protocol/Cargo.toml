@@ -1,0 +1,18 @@
+[package]
+name = "dex-protocol"
+description = "Wire protocol types shared between the DEX runtime and its frontends."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Intentionally minimal: this crate must stay free of tokio and of any runtime
+# internal type so that frontends can depend on it without dragging in the
+# runtime. `postcard` provides the binary encoding used on the IPC path.
+[dependencies]
+postcard = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

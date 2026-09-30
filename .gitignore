@@ -1,0 +1,14 @@
+# Build artifacts
+target/
+**/*.rs.bk
+
+# Local configuration and secrets. `.env.example` is committed; `.env` never is.
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
