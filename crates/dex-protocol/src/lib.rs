@@ -82,12 +82,16 @@ pub fn encode_payload<T: Serialize>(value: &T) -> Result<Vec<u8>, CodecError> {
     postcard::to_allocvec(value).map_err(|e| CodecError::Encode(e.to_string()))
 }
 
+/// A complete frame found in a buffer: the 4-byte length header, and the
+/// payload it describes.
+pub type FrameSplit<'a> = (&'a [u8], &'a [u8]);
+
 /// Read the length prefix and return the payload slice.
 ///
 /// Returns `Ok(None)` when `buf` does not yet hold a complete frame, so a
 /// streaming reader can accumulate and retry without a partial-read state
 /// machine.
-pub fn split_frame(buf: &[u8]) -> Result<Option<(&[u8], &[u8])>, CodecError> {
+pub fn split_frame(buf: &[u8]) -> Result<Option<FrameSplit<'_>>, CodecError> {
     if buf.len() < 4 {
         return Ok(None);
     }

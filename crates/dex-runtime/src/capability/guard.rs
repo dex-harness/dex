@@ -62,34 +62,56 @@ impl PathGuard {
     /// Resolve a path that may not exist yet, as for a create or an edit.
     ///
     /// When the target exists it is canonicalized directly, so writing *through*
-    /// a symlink out of the tree is rejected. When it does not exist, the parent
-    /// is canonicalized instead, so a new file cannot be created outside the
-    /// root by naming one.
+    /// a symlink out of the tree is rejected. When it does not exist, the
+    /// nearest existing ancestor is canonicalized instead: a new file may name
+    /// parent directories that do not exist yet, and the containment check has
+    /// to anchor on something that does. The remaining components are then
+    /// re-appended, so `a/b/c.txt` resolves correctly whether or not `a/b`
+    /// exists, and an escape via `..` is still caught at the anchor.
     pub fn resolve_for_write(&self, raw: &str) -> Result<PathBuf, CapabilityError> {
         let joined = self.join(raw);
         if joined.exists() {
             return self.resolve_existing(raw);
         }
-        let parent = joined.parent().ok_or_else(|| {
-            CapabilityError::new(
-                CapabilityErrorKind::InvalidArgument,
-                format!("{} has no parent directory", joined.display()),
-            )
-        })?;
-        let canonical_parent = parent.canonicalize().map_err(|e| {
-            CapabilityError::new(
-                CapabilityErrorKind::ResourceNotFound,
-                format!("directory {} does not exist: {e}", parent.display()),
-            )
-        })?;
-        self.contain(&canonical_parent, raw)?;
-        let name = joined.file_name().ok_or_else(|| {
-            CapabilityError::new(
-                CapabilityErrorKind::InvalidArgument,
-                format!("{} does not name a file", joined.display()),
-            )
-        })?;
-        Ok(canonical_parent.join(name))
+
+        // Climb from the full path up to the closest component that exists,
+        // remembering each one so the result can be rebuilt downwards.
+        let mut anchor: &Path = &joined;
+        let mut trailing: Vec<std::ffi::OsString> = Vec::new();
+        let canonical_anchor = loop {
+            match anchor.canonicalize() {
+                Ok(canonical) => break canonical,
+                Err(_) => {
+                    let (Some(name), Some(parent)) = (anchor.file_name(), anchor.parent()) else {
+                        return Err(CapabilityError::new(
+                            CapabilityErrorKind::InvalidArgument,
+                            format!(
+                                "{} does not name a path under the working directory",
+                                joined.display()
+                            ),
+                        ));
+                    };
+                    trailing.push(name.to_os_string());
+                    anchor = parent;
+                }
+            }
+        };
+
+        // Containment is decided at the anchor: this is what catches a `..`
+        // climb, because canonicalizing `root/../..` lands outside the root.
+        self.contain(&canonical_anchor, raw)?;
+
+        let mut resolved = canonical_anchor;
+        for name in trailing.iter().rev() {
+            if name == ".." {
+                return Err(CapabilityError::new(
+                    CapabilityErrorKind::PermissionDenied,
+                    format!("{raw:?} resolves outside the session working directory"),
+                ));
+            }
+            resolved.push(name);
+        }
+        Ok(resolved)
     }
 
     /// Join against the root. A leading `/` is *not* treated as absolute here:

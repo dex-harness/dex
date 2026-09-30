@@ -17,7 +17,12 @@
 //! capability implementation cannot forget to authorize, because the only way
 //! to reach the filesystem is a `CapabilityCtx` method that already did.
 
+pub mod filesystem;
+pub mod git;
 pub mod guard;
+pub mod process;
+pub mod repo;
+pub mod testing;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -33,7 +38,6 @@ use crate::events::EventSink;
 use crate::memory::MemoryStore;
 
 pub use guard::PathGuard;
-
 /// A capability failure, carrying the reason a program branches on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CapabilityError {
