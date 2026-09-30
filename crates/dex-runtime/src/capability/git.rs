@@ -188,6 +188,7 @@ mod tests {
     use dex_protocol::{CallId, SessionId};
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
+    use crate::script::UiHandle;
 
     fn repo(authority: &str) -> (tempfile::TempDir, CapabilityCtx) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -215,6 +216,7 @@ mod tests {
             Arc::new(MemoryStore::new(root.join(".dex-memory"))),
             CancellationToken::new(),
             CallId(1),
+            UiHandle::channel().0,
         );
         (dir, ctx)
     }

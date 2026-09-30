@@ -88,10 +88,57 @@ Two structural invariants are enforced by tests rather than by convention:
   `script/rune/*` may import `rune`; a test asserts no other module does. The
   `ScriptRuntime` trait is the seam a future language replaces.
 
+## How a program is written
+
+A program is a Rune module, so it holds declarations and has exactly one entry
+point, `main`. The value `main` returns is the program's result.
+
+```rune
+pub fn main() {
+    let found = dex::find("authenticate");
+    let names = [];
+    for m in found["matches"] {
+        if m["text"].contains("token") {
+            names.push(m["path"]);
+        }
+    }
+    names
+}
+```
+
+Three properties of the language shape that API, and each is enforced by a test
+rather than assumed:
+
+- **Fixed arity.** Rune has no optional arguments, so capabilities are named for
+  the case they serve — `dex::find(q)` beside `dex::find_in(q, path)` — rather
+  than taking a bag of defaults.
+- **No `try`/`catch`.** A capability failure ends the program with a precise
+  reason, which the runtime hands back to the model so a corrected program can
+  follow. The adjustment happens where the decision is made.
+- **No ambient authority.** The Rune context is built with stdio disabled, so
+  `println!` does not resolve. The only reachable operations are the ones
+  registered in the `dex` module, and the VM has no way to reach the filesystem,
+  the network, or a process except through the capability layer that
+  authorizes each call.
+
+## Execution limits
+
+Each program runs under a budget: a wall-clock deadline, an **instruction**
+budget enforced by Rune's own per-instruction counter, a capability-invocation
+count, and separate filesystem read/write and output-size limits.
+
+The instruction budget is what makes a tight compute-only loop stoppable. A
+wall clock alone cannot interrupt a program that never yields, so the two cover
+each other: the instruction budget catches a loop, and the deadline catches a
+program that is making progress but slowly. Cancellation is a separate signal
+that propagates to the model request, a running test process, and the program.
+
 ## Known limitation
 
-Rune exposes no instruction or operation budget, so a program that loops
-forever without ever awaiting cannot be preempted mid-instruction. Execution
-limits are enforced instead by a wall-clock deadline around the driving future,
-a capability-invocation budget, and filesystem read/write budgets, all checked in
-the native runtime. This is deliberate and documented rather than hidden.
+`DEX_BUDGET_INSTRUCTIONS` is a best-effort bound rather than a hard one. Rune
+notes that a budget cannot be enforced without cooperation from native
+functions, so a capability that spends a long time inside Rust is bounded by the
+byte and deadline limits rather than by instructions. That is deliberate: the
+capability layer is the authoritative boundary, and the language-level counter
+is a second line of defence.
+

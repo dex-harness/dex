@@ -273,6 +273,7 @@ mod tests {
     use dex_protocol::{CallId, SessionId};
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
+    use crate::script::UiHandle;
 
     fn target(name: &str) -> &'static Target {
         TARGETS.iter().find(|t| t.name == name).expect("target")
@@ -386,6 +387,7 @@ mod tests {
             Arc::new(MemoryStore::new(dir.path().join("memory"))),
             CancellationToken::new(),
             CallId(1),
+            UiHandle::channel().0,
         );
         let runtime = tokio::runtime::Runtime::new().expect("runtime");
         let err = runtime
@@ -405,6 +407,7 @@ mod tests {
             Arc::new(MemoryStore::new(dir.path().join("memory"))),
             CancellationToken::new(),
             CallId(1),
+            UiHandle::channel().0,
         );
         assert_eq!(
             run(&ctx, "cargo", &["test".into()]).await.unwrap_err().kind,
@@ -428,6 +431,7 @@ mod tests {
             Arc::new(MemoryStore::new(dir.path().join("memory"))),
             CancellationToken::new(),
             CallId(1),
+            UiHandle::channel().0,
         );
         std::fs::write(
             dir.path().join("Makefile"),

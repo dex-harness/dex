@@ -262,6 +262,7 @@ mod tests {
     use dex_protocol::{CallId, SessionId};
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
+    use crate::script::UiHandle;
 
     fn fixture() -> (tempfile::TempDir, CapabilityCtx) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -280,6 +281,7 @@ mod tests {
             Arc::new(MemoryStore::new(dir.path().join("memory"))),
             CancellationToken::new(),
             CallId(1),
+            UiHandle::channel().0,
         );
         (dir, ctx)
     }
@@ -364,6 +366,7 @@ mod tests {
             Arc::new(MemoryStore::new(dir.path().join("memory"))),
             CancellationToken::new(),
             CallId(1),
+            UiHandle::channel().0,
         );
         let err = read(&ctx, "blob.bin", 1, 0).expect_err("must refuse");
         assert_eq!(err.kind, CapabilityErrorKind::InvalidArgument);
@@ -430,6 +433,7 @@ mod tests {
             Arc::new(MemoryStore::new(dir.path().join("memory"))),
             CancellationToken::new(),
             CallId(1),
+            UiHandle::channel().0,
         );
         assert_eq!(
             read(&ctx, "a.rs", 1, 0).unwrap_err().kind,

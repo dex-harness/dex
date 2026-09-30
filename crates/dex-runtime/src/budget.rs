@@ -22,6 +22,14 @@ use dex_protocol::CapabilityErrorKind;
 pub struct ExecutionBudget {
     /// Wall-clock ceiling for the whole program.
     pub wall_clock: Duration,
+    /// Scripting-language instructions the program may execute.
+    ///
+    /// Enforced by the script runtime's own instruction budget, so a program
+    /// that computes forever is stopped mid-flight rather than being left to
+    /// run until the wall clock. Native capability work is bounded separately by
+    /// the call and byte budgets below, because a native function is not
+    /// charged instructions.
+    pub instructions: u64,
     /// Capability invocations permitted.
     pub capability_calls: u32,
     /// Filesystem bytes readable.
@@ -38,6 +46,7 @@ impl Default for ExecutionBudget {
     fn default() -> Self {
         Self {
             wall_clock: Duration::from_secs(30),
+            instructions: 20_000_000,
             capability_calls: 100,
             read_bytes: 32 * 1024 * 1024,
             write_bytes: 8 * 1024 * 1024,
@@ -51,8 +60,9 @@ impl ExecutionBudget {
     /// Human-readable form for the CLI banner and for `dex.capabilities()`.
     pub fn describe(&self) -> String {
         format!(
-            "wall_clock={}ms capability_calls={} read={}B write={}B output={}B command={}ms",
+            "wall_clock={}ms instructions={} capability_calls={} read={}B write={}B output={}B command={}ms",
             self.wall_clock.as_millis(),
+            self.instructions,
             self.capability_calls,
             self.read_bytes,
             self.write_bytes,

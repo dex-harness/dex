@@ -231,6 +231,7 @@ mod tests {
     use dex_protocol::{CallId, SessionId};
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
+    use crate::script::UiHandle;
 
     fn ctx(root: &std::path::Path) -> CapabilityCtx {
         CapabilityCtx::new(
@@ -241,6 +242,7 @@ mod tests {
             Arc::new(MemoryStore::new(root.join("memory"))),
             CancellationToken::new(),
             CallId(1),
+            UiHandle::channel().0,
         )
     }
 

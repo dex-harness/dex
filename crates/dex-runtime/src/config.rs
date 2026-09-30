@@ -130,6 +130,7 @@ pub fn from_values(values: &HashMap<String, String>) -> Result<RuntimeConfig, Co
 
     let budget = ExecutionBudget {
         wall_clock: Duration::from_millis(number(values, "DEX_BUDGET_WALL_CLOCK_MS", 30_000)?),
+        instructions: number(values, "DEX_BUDGET_INSTRUCTIONS", 20_000_000)?,
         capability_calls: number(values, "DEX_BUDGET_CAPABILITY_CALLS", 100)? as u32,
         read_bytes: number(values, "DEX_BUDGET_READ_BYTES", 33_554_432)?,
         write_bytes: number(values, "DEX_BUDGET_WRITE_BYTES", 8_388_608)?,

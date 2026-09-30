@@ -16,6 +16,7 @@ pub mod capability;
 pub mod config;
 pub mod events;
 pub mod memory;
+pub mod script;
 
 pub use config::RuntimeConfig;
 

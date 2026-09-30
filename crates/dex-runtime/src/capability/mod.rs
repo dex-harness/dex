@@ -100,7 +100,25 @@ impl From<std::io::Error> for CapabilityError {
     }
 }
 
+/// Allocates the identifier that correlates one capability's start, output and
+/// finish events.
+#[derive(Clone, Debug, Default)]
+pub struct CallIds(std::sync::Arc<std::sync::atomic::AtomicU64>);
+
+impl CallIds {
+    pub fn next(&self) -> CallId {
+        CallId(
+            self.0
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+}
+
 /// Everything a capability implementation is allowed to touch.
+///
+/// A `CapabilityCtx` is scoped to one capability call: `scoped()` yields a copy
+/// carrying a fresh [`CallId`], so concurrent calls in one program do not share
+/// an identifier and their events can be told apart.
 #[derive(Clone)]
 pub struct CapabilityCtx {
     pub guard: PathGuard,
@@ -110,9 +128,13 @@ pub struct CapabilityCtx {
     pub memory: Arc<MemoryStore>,
     pub cancel: CancellationToken,
     pub call: CallId,
+    /// Route to the human, for the interactive capabilities.
+    pub ui: crate::script::UiHandle,
+    calls: CallIds,
 }
 
 impl CapabilityCtx {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         guard: PathGuard,
         authority: Arc<Authority>,
@@ -121,6 +143,7 @@ impl CapabilityCtx {
         memory: Arc<MemoryStore>,
         cancel: CancellationToken,
         call: CallId,
+        ui: crate::script::UiHandle,
     ) -> Self {
         Self {
             guard,
@@ -130,7 +153,17 @@ impl CapabilityCtx {
             memory,
             cancel,
             call,
+            ui,
+            calls: CallIds::default(),
         }
+    }
+
+    /// A copy of this context for a new capability call, with its own
+    /// identifier but the same budget, authority and cancellation state.
+    pub fn scoped(&self) -> Self {
+        let mut next = self.clone();
+        next.call = self.calls.next();
+        next
     }
 
     pub fn working_dir(&self) -> &Path {
@@ -266,6 +299,7 @@ impl std::fmt::Debug for CapabilityCtx {
 mod tests {
     use super::*;
     use crate::budget::ExecutionBudget;
+    use crate::script::UiHandle;
     use dex_protocol::SessionId;
 
     fn ctx(root: &Path, authority: &str, budget: ExecutionBudget) -> CapabilityCtx {
@@ -278,6 +312,7 @@ mod tests {
             Arc::new(MemoryStore::new(root.join("memory"))),
             CancellationToken::new(),
             CallId(1),
+            UiHandle::channel().0,
         )
     }
 
