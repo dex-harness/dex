@@ -44,6 +44,10 @@ impl Agent {
     /// Run one user turn.
     pub async fn run(&self, session: &Arc<Session>) -> SessionStatus {
         let mut round = 0u32;
+        // Programs already run this turn, and what they produced. A model stuck
+        // in a loop would otherwise spend every remaining round re-running the
+        // same code and getting the same failure.
+        let mut attempted: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         loop {
             if session.cancel.is_cancelled() {
                 session.events.emit(Event::SessionFinished {
@@ -64,7 +68,7 @@ impl Agent {
                 return SessionStatus::Completed;
             }
 
-            let Some(outcome) = self.one_round(session, round).await else {
+            let Some(outcome) = self.one_round(session, round, &mut attempted).await else {
                 return SessionStatus::Failed;
             };
             round += 1;
@@ -80,7 +84,12 @@ impl Agent {
     /// One model request, one program, one execution.
     ///
     /// `None` means the turn is over and cannot continue.
-    async fn one_round(&self, session: &Arc<Session>, round: u32) -> Option<Round> {
+    async fn one_round(
+        &self,
+        session: &Arc<Session>,
+        round: u32,
+        attempted: &mut std::collections::HashMap<String, String>,
+    ) -> Option<Round> {
         // A fresh UI handle per program: its answer slot belongs to this run.
         let ui = UiHandle::new(session.ui_tx.clone());
 
@@ -116,6 +125,31 @@ impl Agent {
             });
             return Some(Round::Failed);
         };
+
+        // Running the same program again would produce the same result, so say
+        // so plainly instead of spending a round on it. Two repeats ends the
+        // turn: the model is not making progress.
+        if let Some(previous) = attempted.get(&program) {
+            let repeats = attempted.len();
+            session.push_turn(Turn::program(
+                program.clone(),
+                format!(
+                    "You already ran this exact program and it produced:\n\n{previous}\n\n\
+                     It will produce the same thing again. Write a different program, or \
+                     answer with what you have."
+                ),
+            ));
+            if repeats >= 2 {
+                session.events.emit(Event::Answer {
+                    text: format!(
+                        "Stopped: the same program was attempted {repeats} times with no \
+                         progress. The last result is shown above."
+                    ),
+                });
+                return Some(Round::Answered);
+            }
+            return Some(Round::Continue);
+        }
 
         let call_id = CallId(round as u64 + 1);
         session.events.emit(Event::ProgramStarted {
@@ -154,6 +188,7 @@ impl Agent {
             }
         };
 
+        attempted.insert(program.clone(), outcome.clone());
         // The model reads its own program and what running it produced. That
         // pair is the only thing carried forward, which is what keeps a long
         // turn from filling the context with intermediate chatter.

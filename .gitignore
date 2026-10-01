@@ -12,3 +12,6 @@ target/
 .vscode/
 *.swp
 .DS_Store
+
+# Local acceptance demo: a scripted provider and its socket.
+.demo/

@@ -658,6 +658,34 @@ async fn a_front_end_that_is_not_the_terminal_works_the_same() {
 }
 
 #[tokio::test]
+async fn a_model_that_repeats_itself_is_stopped_early() {
+    // The provider hands back the same failing program every time. Without
+    // repeat detection the turn would spend all its rounds re-running identical
+    // code and getting an identical failure.
+    let stuck = "```rune\npub fn main() { dex::respond(\"never reached\"); }```";
+    let h = Harness::start(vec![stuck, stuck, stuck, stuck, stuck, stuck, stuck, stuck])
+        .await;
+
+    let (mut client, session) = h.session().await;
+    client.send(session, "do something").await.expect("send");
+    let events = client.drain_turn(20_000).await;
+
+    let programs = events
+        .iter()
+        .filter(|f| matches!(f.event, Event::ProgramStarted { .. }))
+        .count();
+    assert!(
+        programs <= 2,
+        "a repeated program should not be re-run, ran {programs} times"
+    );
+    assert!(
+        events.iter().any(|f| matches!(&f.event, Event::Answer { .. })),
+        "the turn should still end with an answer: {:?}",
+        names(&events)
+    );
+}
+
+#[tokio::test]
 async fn a_budget_that_cannot_be_met_stops_the_program() {
     let h = Harness::start_with(
         vec!["```rune\npub fn main() { let x = 0; loop { x += 1; } x }```"],

@@ -29,69 +29,35 @@ Result
 Model
 ```
 
-A single program can do `discover → inspect → filter → modify → test → summarize`
-with no model round-trip between steps. There is no model-facing tool-call
-schema, no `tools` array is ever sent to a provider, and no shell is exposed to
-the model.
+Several capabilities in one program is the normal case. Searching, reading,
+filtering, editing and testing happen inside a single program, because each model
+round trip costs a turn and a pile of context.
 
-## Layout
-
-```text
-crates/
-├── dex-protocol/     Wire types shared with frontends. serde only, no tokio.
-└── dex-runtime/      Everything else. Produces the `dexd` binary.
-```
-
-`dex-protocol` is the single source of truth for anything that crosses a process
-boundary. It is deliberately free of tokio and of runtime internals so a
-frontend can depend on it without pulling in the runtime.
-
-## Configuration
-
-Copy `.env.example` to `.env` and fill in an API key. `.env` is gitignored.
-
-The one setting that decides whether anything works is `DEX_AUTHORITY`: authority
-is **deny by default**, and a capability runs only when a matching grant exists
-and the requested resource matches the grant's scope. The example file documents
-a development grant for a repository at `/work`.
-
-## Running
+## Running it
 
 ```bash
-cargo build --release
-./target/release/dexd              # binds ~/.dex/dex.sock
+cp .env.example .env      # add OPENCODE_GO_API_KEY and a DEX_AUTHORITY grant
+cargo run --release --bin dexd
 ```
+
+`dexd --check` prints the effective configuration, including exactly which
+authorities were granted, without starting anything.
 
 In another terminal, from a checkout of `dex-cli`:
 
 ```bash
-dex
+dex --cwd /path/to/a/repo
+dex --cwd /path/to/a/repo -p "find the auth implementation"
 ```
 
-`dexd` does not spawn or supervise frontends, and `dex` never spawns the
-runtime. If the socket is missing, the CLI says so rather than quietly starting
-one, because a hidden spawn would hide the boundary this project exists to
-demonstrate.
-
-## Development
-
-```bash
-cargo test --workspace
-cargo clippy --workspace --all-targets
-```
-
-Two structural invariants are enforced by tests rather than by convention:
-
-- **No tool calls.** A test asserts the outgoing provider request body contains
-  no `tools` field.
-- **The scripting language is an implementation detail.** Only
-  `script/rune/*` may import `rune`; a test asserts no other module does. The
-  `ScriptRuntime` trait is the seam a future language replaces.
+`dex` will not start the runtime for you. If the socket is missing it says so,
+because quietly spawning `dexd` would hide the boundary these two repositories
+exist to demonstrate.
 
 ## How a program is written
 
-A program is a Rune module, so it holds declarations and has exactly one entry
-point, `main`. The value `main` returns is the program's result.
+A program is a Rune module: declarations with exactly one entry point, `main`.
+The value `main` returns is the program's result.
 
 ```rune
 pub fn main() {
@@ -117,28 +83,69 @@ rather than assumed:
   follow. The adjustment happens where the decision is made.
 - **No ambient authority.** The Rune context is built with stdio disabled, so
   `println!` does not resolve. The only reachable operations are the ones
-  registered in the `dex` module, and the VM has no way to reach the filesystem,
-  the network, or a process except through the capability layer that
-  authorizes each call.
+  registered in the `dex` module, and the VM has no route to the filesystem, the
+  network, or a process except through the layer that authorizes each call.
+
+## Capabilities and authority
+
+There is no `exec`, no `shell`, and no general command runner. `testing.run` is a
+table of allowlisted tools with allowlisted arguments, and `git.checkout` refuses
+a branch name git would read as an option. Arguments are passed as argv, never
+through a shell, so there is nothing to quote and no metacharacter to blacklist.
+
+Authority is **deny by default**. A capability runs only when a grant names it
+*and* the resource matches the grant's scope:
+
+```
+DEX_AUTHORITY=filesystem.read=/work/**;filesystem.write=/work/**;memory.write=*
+```
+
+Enforcement is in Rust below the script runtime, so a generated program can ask
+but cannot widen. Path containment is a separate check and both must pass: it
+compares canonicalized paths, so a symlink pointing out of the tree fails while
+one staying inside succeeds.
 
 ## Execution limits
 
-Each program runs under a budget: a wall-clock deadline, an **instruction**
-budget enforced by Rune's own per-instruction counter, a capability-invocation
-count, and separate filesystem read/write and output-size limits.
+Each program runs under a wall-clock deadline, an **instruction** budget from
+Rune's own per-instruction counter, a capability-invocation count, and separate
+filesystem read/write and output-size limits.
 
-The instruction budget is what makes a tight compute-only loop stoppable. A
-wall clock alone cannot interrupt a program that never yields, so the two cover
-each other: the instruction budget catches a loop, and the deadline catches a
-program that is making progress but slowly. Cancellation is a separate signal
-that propagates to the model request, a running test process, and the program.
+The instruction budget is what makes a tight compute-only loop stoppable. A wall
+clock alone cannot interrupt a program that never yields, so the two cover each
+other: the instruction budget catches a loop, and the deadline catches a program
+making progress slowly. Cancellation is a third signal, and it reaches the model
+request, a running test process, and the program.
 
-## Known limitation
+`DEX_BUDGET_INSTRUCTIONS` is best-effort rather than a hard bound. Rune notes that
+a budget cannot be enforced without cooperation from native functions, so a
+capability that spends a long time inside Rust is bounded by the byte and deadline
+limits instead. The capability layer is the authoritative boundary; the language
+counter is a second line of defence.
 
-`DEX_BUDGET_INSTRUCTIONS` is a best-effort bound rather than a hard one. Rune
-notes that a budget cannot be enforced without cooperation from native
-functions, so a capability that spends a long time inside Rust is bounded by the
-byte and deadline limits rather than by instructions. That is deliberate: the
-capability layer is the authoritative boundary, and the language-level counter
-is a second line of defence.
+## Memory
 
+`dex::remember(key, program)` stores a reusable procedure; `dex::recall(key)`
+loads one. Records are file-backed JSON under `~/.dex/memory`, and a program
+remembered in one turn can be reloaded in a later one. Loading counts itself, so
+the number a program sees answers "how well has this held up" rather than being
+permanently one behind.
+
+## Development
+
+```bash
+cargo test --workspace
+cargo clippy --workspace --all-targets
+```
+
+`crates/dex-runtime/tests/end_to_end.rs` starts a real runtime on a real socket
+and drives it with the real protocol. The only substitution is the model
+provider, which is scripted, so the suite is deterministic and needs no network.
+
+Two structural invariants are enforced by tests rather than by convention:
+
+- **No tool calls.** A test asserts the outgoing provider body contains no
+  `tools`, `functions` or `tool_choice` field.
+- **The scripting language is an implementation detail.** Only `script/rune/*`
+  may import `rune`; everything else is written against the `ScriptRuntime`
+  trait, so swapping the language touches one construction site.
