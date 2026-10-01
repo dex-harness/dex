@@ -35,6 +35,14 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
         }
     }
 
+    /// Read the next response, or `Closed` at end of stream.
+    ///
+    /// A convenience over [`FrameReader::next`] for the common case, so a
+    /// caller holding this type does not have to spell the type parameter.
+    pub async fn next_frame(&mut self) -> Result<Frame<ServerResponse>, io::Error> {
+        self.next().await
+    }
+
     /// Read the next frame, or `Closed` at end of stream.
     pub async fn next<T: serde::de::DeserializeOwned>(&mut self) -> Result<Frame<T>, io::Error> {
         loop {
@@ -90,6 +98,17 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
         self.inner.write_all(&framed).await?;
         self.inner.flush().await
+    }
+
+    /// Write bytes that are already framed.
+    pub async fn send_raw(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.inner.write_all(bytes).await?;
+        self.inner.flush().await
+    }
+
+    /// Close the write side, ending the connection from this end.
+    pub async fn close(&mut self) -> io::Result<()> {
+        self.inner.shutdown().await
     }
 
     pub async fn shutdown(mut self) -> io::Result<()> {

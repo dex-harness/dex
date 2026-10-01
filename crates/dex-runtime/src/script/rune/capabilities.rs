@@ -524,11 +524,12 @@ fn recall(key: &str) -> VmResult<Value> {
 
     let ctx = current_ctx().map_err(|_| missing_context())?.scoped();
     ctx.emit_started("memory.load", format!("{key:?}"));
+    // Count this load before reading the record back, so what a program sees
+    // includes it. The number answers "how well has this held up", and a count
+    // that ignored the load in progress would be off by one forever.
+    let _ = ctx.memory.record_use(key);
     match ctx.memory.load(key) {
         Ok(loaded) => {
-            // Loading counts as use: the run count and last-used stamp are what
-            // tell a human how well a stored procedure has held up.
-            let _ = ctx.memory.record_use(key);
             ctx.emit_finished("memory.load", true, "loaded");
             to_rune(&loaded.to_value())
         }

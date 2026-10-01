@@ -96,4 +96,15 @@ impl ServerResponse {
     pub fn err(id: RequestId, error: ErrorPayload) -> Self {
         ServerResponse::Err { id, error }
     }
+
+    /// The event, if this response carries one.
+    ///
+    /// A consumer that only cares about events can read a stream without
+    /// matching on the acknowledgement variants.
+    pub fn into_event(self) -> Option<EventFrame> {
+        match self {
+            ServerResponse::Event(frame) => Some(frame),
+            _ => None,
+        }
+    }
 }
