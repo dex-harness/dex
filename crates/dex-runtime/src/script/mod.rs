@@ -179,13 +179,18 @@ pub struct ScriptLanguage {
 #[derive(Clone)]
 pub struct UiHandle {
     out: mpsc::UnboundedSender<UiEvent>,
+    /// Written by `respond` so the agent can read the answer synchronously.
+    response: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 /// The program-facing half of a UI channel.
 impl UiHandle {
     /// Build a handle over an existing sender.
     pub fn new(out: mpsc::UnboundedSender<UiEvent>) -> Self {
-        Self { out }
+        Self {
+            out,
+            response: Arc::new(std::sync::Mutex::new(None)),
+        }
     }
 
     /// Pair a handle with the receiving end the session drains.
@@ -195,8 +200,22 @@ impl UiHandle {
     }
 
     /// Deliver the turn's answer and end the turn.
+    ///
+    /// The answer is also written to a slot the caller can read synchronously.
+    /// The channel alone would leave the agent guessing whether the forwarder
+    /// task had run yet; the slot is written by the same call that sends, so
+    /// reading it after the program returns is deterministic.
     pub fn respond(&self, message: impl Into<String>) {
-        let _ = self.out.send(UiEvent::Respond(message.into()));
+        let message = message.into();
+        if let Ok(mut slot) = self.response.lock() {
+            *slot = Some(message.clone());
+        }
+        let _ = self.out.send(UiEvent::Respond(message));
+    }
+
+    /// Take the answer if `respond` was called, clearing it.
+    pub fn take_response(&self) -> Option<String> {
+        self.response.lock().ok().and_then(|mut slot| slot.take())
     }
 
     /// Ask the human something and wait for a reply.

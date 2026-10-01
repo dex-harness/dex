@@ -16,7 +16,10 @@ pub mod capability;
 pub mod config;
 pub mod events;
 pub mod memory;
+pub mod provider;
 pub mod script;
+pub mod server;
+pub mod session;
 
 pub use config::RuntimeConfig;
 

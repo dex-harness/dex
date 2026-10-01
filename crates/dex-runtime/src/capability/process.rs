@@ -83,12 +83,17 @@ pub async fn run(
 
     let cap = ctx.budget.limits().output_bytes as usize;
     let (tx, mut rx) = mpsc::channel::<(OutputStream, Vec<u8>)>(16);
+    // The reader tasks are kept so their output can be awaited: a child can
+    // exit before the pipes have been drained, and dropping the receiver then
+    // would lose whatever the command printed.
+    let mut readers = Vec::new();
     if let Some(pipe) = child.stdout.take() {
-        spawn_reader(pipe, OutputStream::Stdout, tx.clone());
+        readers.push(spawn_reader(pipe, OutputStream::Stdout, tx.clone()));
     }
     if let Some(pipe) = child.stderr.take() {
-        spawn_reader(pipe, OutputStream::Stderr, tx);
+        readers.push(spawn_reader(pipe, OutputStream::Stderr, tx.clone()));
     }
+    drop(tx);
 
     // Drain pipe output while the child runs, emitting as it arrives.
     let mut stdout: Vec<u8> = Vec::new();
@@ -146,14 +151,17 @@ pub async fn run(
         }
     };
 
-    // Collect anything still buffered in the pipes after the child exited.
+    // The child has exited, so both pipes will reach EOF. Wait for the readers
+    // to finish before draining, or the tail of the output is lost.
+    for reader in readers {
+        let _ = reader.await;
+    }
     while let Ok((stream, bytes)) = rx.try_recv() {
         match stream {
             OutputStream::Stdout => stdout.extend(bytes),
             OutputStream::Stderr => stderr.extend(bytes),
         }
     }
-    // Let the reader tasks observe EOF and finish.
     drop(rx);
 
     let duration_ms = started.elapsed().as_millis() as u64;
@@ -170,7 +178,11 @@ pub async fn run(
 }
 
 /// Pump one pipe into the channel until EOF.
-fn spawn_reader<R>(mut pipe: R, stream: OutputStream, tx: mpsc::Sender<(OutputStream, Vec<u8>)>)
+fn spawn_reader<R>(
+    mut pipe: R,
+    stream: OutputStream,
+    tx: mpsc::Sender<(OutputStream, Vec<u8>)>,
+) -> tokio::task::JoinHandle<()>
 where
     R: AsyncReadExt + Unpin + Send + 'static,
 {
@@ -186,7 +198,7 @@ where
                 }
             }
         }
-    });
+    })
 }
 
 /// Signal the child's whole process group.
